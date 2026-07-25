@@ -69,14 +69,43 @@ export default function App() {
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [isAdminCmsOpen, setIsAdminCmsOpen] = useState(false);
 
-  // Listen for browser popstate
+  // Fetch live movies catalog from backend API & keep in sync with CMS uploads
+  const loadMoviesFromApi = async () => {
+    try {
+      const res = await fetch('/api/v1/user/movies');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.movies && Array.isArray(data.movies) && data.movies.length > 0) {
+          setMovies(data.movies);
+          localStorage.setItem('cinephile_ott_movies', JSON.stringify(data.movies));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to sync movies from API:', e);
+    }
+  };
+
   useEffect(() => {
+    loadMoviesFromApi();
+
     const handlePopState = () => {
       setPathMode(window.location.pathname.startsWith('/admin') ? 'admin' : 'user');
     };
+
+    const handleCatalogUpdate = () => {
+      loadMoviesFromApi();
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+    window.addEventListener('cineverse_movies_updated', handleCatalogUpdate);
+    window.addEventListener('storage', handleCatalogUpdate);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('cineverse_movies_updated', handleCatalogUpdate);
+      window.removeEventListener('storage', handleCatalogUpdate);
+    };
+  }, [pathMode]);
 
   // Sync state to localStorage
   useEffect(() => {

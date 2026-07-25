@@ -23,6 +23,13 @@ export const MovieCard: React.FC<MovieCardProps> = ({
       {/* Poster Container */}
       <div className="aspect-[2/3] bg-[#1A1A1A] rounded-xl border border-white/5 overflow-hidden mb-2.5 relative shadow-2xl shadow-black group-hover:border-red-600/50 transition-all duration-300">
         
+        {/* NEW Badge */}
+        {(movie.isNew || movie.releaseYear >= 2026) && (
+          <div className="absolute top-2.5 left-2.5 z-10 bg-red-600 text-white font-black px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider flex items-center gap-1 shadow-lg shadow-red-600/50 animate-pulse border border-red-400">
+            <span>🔥 NEW</span>
+          </div>
+        )}
+
         {/* Rating Badge */}
         <div className="absolute top-2.5 right-2.5 z-10 bg-black/70 backdrop-blur-md px-2 py-1 rounded-md text-[10px] font-bold text-yellow-500 flex items-center gap-1 border border-white/10">
           <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" />

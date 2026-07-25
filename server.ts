@@ -335,9 +335,13 @@ let adCampaigns = [
   { id: "ad_2", title: "Sennheiser Ambeo Soundbar", client: "Sennheiser", impressions: 210400, clickRate: "2.8%", status: "Active", budget: "$8,500" }
 ];
 
-// User Catalog Endpoint
+// User Catalog Endpoints
 app.get("/api/v1/user/movies", (_req, res) => {
-  res.json({ movies: catalogMovies });
+  res.json({ movies: catalogMovies, catalog: catalogMovies });
+});
+
+app.get("/api/movies", (_req, res) => {
+  res.json({ movies: catalogMovies, catalog: catalogMovies });
 });
 
 app.get("/api/v1/user/movies/:id", (req, res) => {
@@ -434,9 +438,11 @@ app.post("/api/v1/admin/movies", (req, res) => {
     subtitles: newM.subtitles || ["English CC"],
     cast: newM.cast || [],
     reviews: [],
-    featured: newM.featured || false,
-    trendingOrder: catalogMovies.length + 1,
-    recommendedOrder: catalogMovies.length + 1,
+    featured: newM.featured ?? true,
+    isNew: true,
+    createdAt: new Date().toISOString(),
+    trendingOrder: 1,
+    recommendedOrder: 1,
     streamUrl: newM.streamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
   };
 

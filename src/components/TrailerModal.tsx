@@ -19,11 +19,21 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({ movie, onClose }) =>
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
-  // Playback Source Mode: 'stream' (Direct HLS/MP4 Video Stream Link) or 'trailer' (YouTube Embed)
+  // Playback Source Mode: 'stream' (Direct HLS/MP4 Video Stream Link or Embedded Player) or 'trailer' (YouTube Embed)
   const defaultStreamUrl = movie?.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
   const [playerMode, setPlayerMode] = useState<'stream' | 'trailer'>('stream');
 
   if (!movie) return null;
+
+  // Helper to extract YouTube embed ID if user put YouTube link as streamUrl
+  const getYouTubeEmbedId = (url?: string) => {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  const streamYoutubeId = getYouTubeEmbedId(movie.streamUrl);
 
   const showToast = (msg: string) => {
     setNotification(msg);
@@ -125,13 +135,24 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({ movie, onClose }) =>
         {/* Video Player Area */}
         <div className="relative aspect-video w-full bg-black group">
           {playerMode === 'stream' ? (
-            <video
-              src={defaultStreamUrl}
-              controls
-              autoPlay
-              className="w-full h-full object-contain bg-black"
-              id="direct-movie-stream-video"
-            />
+            streamYoutubeId ? (
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${streamYoutubeId}?autoplay=1&rel=0&modestbranding=1`}
+                title={`${movie.title} Stream`}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full border-0"
+                id="youtube-stream-iframe"
+              />
+            ) : (
+              <video
+                src={defaultStreamUrl}
+                controls
+                autoPlay
+                className="w-full h-full object-contain bg-black"
+                id="direct-movie-stream-video"
+              />
+            )
           ) : (
             <iframe
               src={`https://www.youtube-nocookie.com/embed/${movie.trailerYoutubeId}?autoplay=1&rel=0&modestbranding=1`}

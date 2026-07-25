@@ -34,6 +34,8 @@ export interface Movie {
   contentRating: string; // PG-13, R, PG, TV-MA
   cast: CastMember[];
   featured?: boolean;
+  isNew?: boolean;
+  createdAt?: string;
   trending?: boolean;
   topRated?: boolean;
   upcoming?: boolean;

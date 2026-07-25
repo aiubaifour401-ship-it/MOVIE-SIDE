@@ -269,7 +269,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
         const data = await res.json();
         if (res.ok) {
           setMovies(data.catalog);
-          showToast(`✅ Created "${formTitle}" in CMS database!`);
+          localStorage.setItem('cinephile_ott_movies', JSON.stringify(data.catalog));
+          window.dispatchEvent(new Event('cineverse_movies_updated'));
+          showToast(`✅ Created "${formTitle}" — Published to User App as NEW!`);
           setIsCreatingMovie(false);
           setActiveTab('movies');
         }
@@ -282,6 +284,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
         const data = await res.json();
         if (res.ok) {
           setMovies(data.catalog);
+          localStorage.setItem('cinephile_ott_movies', JSON.stringify(data.catalog));
+          window.dispatchEvent(new Event('cineverse_movies_updated'));
           showToast(`✅ Updated "${formTitle}" successfully!`);
           setEditingMovie(null);
           setActiveTab('movies');
@@ -301,6 +305,8 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
       if (res.ok) {
         const data = await res.json();
         setMovies(data.catalog);
+        localStorage.setItem('cinephile_ott_movies', JSON.stringify(data.catalog));
+        window.dispatchEvent(new Event('cineverse_movies_updated'));
         showToast(`🗑 Deleted "${title}" from catalog.`);
       }
     } catch (e) {
