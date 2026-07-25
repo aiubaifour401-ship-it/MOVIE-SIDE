@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cineverse-backend-deployment
+  namespace: cineverse-production
+  labels:
+    app: cineverse-backend
+    tier: api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: cineverse-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: cineverse-backend
+        tier: api
+    spec:
+      containers:
+      - name: cineverse-node-app
+        image: registry.cineverse.io/cineverse-app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: cineverse-config
+        - secretRef:
+            name: cineverse-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/health/liveness
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health/readiness
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cineverse-ffmpeg-worker
+  namespace: cineverse-production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cineverse-ffmpeg-worker
+  template:
+    metadata:
+      labels:
+        app: cineverse-ffmpeg-worker
+    spec:
+      containers:
+      - name: ffmpeg-worker
+        image: registry.cineverse.io/cineverse-worker:latest
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  cineverse-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cineverse-production-node
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://cineverse_user:cineverse_secure_pass@postgres:5432/cineverse_db
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - cineverse-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cineverse-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: cineverse_user
+      POSTGRES_PASSWORD: cineverse_secure_pass
+      POSTGRES_DB: cineverse_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - cineverse-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: cineverse-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - cineverse-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: cineverse-nginx-proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - cineverse-app
+    networks:
+      - cineverse-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  cineverse-network:
+    driver: bridge

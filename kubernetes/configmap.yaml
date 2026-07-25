@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cineverse-config
+  namespace: cineverse-production
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  CDN_DOMAIN: "https://cdn.cineverse.io"
+  HLS_SEGMENT_DURATION: "4"
+  FFMPEG_PRESET: "veryfast"
+  REDIS_CACHE_TTL: "86400"

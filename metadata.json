@@ -1,0 +1,6 @@
+{
+  "name": "CINEVERSE PRO • Enterprise OTT Platform",
+  "description": "An enterprise-grade OTT movie and TV streaming platform featuring sleek dark design, 4K HDR video playback, AI movie concierge, interactive trivia, admin CMS, user profiles, and subscription passes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
