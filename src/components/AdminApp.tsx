@@ -37,7 +37,9 @@ import {
   Megaphone,
   UserCheck,
   UserX,
-  Play
+  Play,
+  X,
+  User
 } from 'lucide-react';
 import { Movie } from '../types';
 import { AdminLoginPage } from './AdminLoginPage';
@@ -117,6 +119,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
 
   // Admin Data Stores
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [customerUsers, setCustomerUsers] = useState<any[]>([]);
+  const [userTabMode, setUserTabMode] = useState<'customers' | 'admin_team'>('customers');
+  const [isAddCustomerModalOpen, setIsAddCustomerModalOpen] = useState(false);
+
+  // New Customer Form Fields
+  const [newCustUsername, setNewCustUsername] = useState('');
+  const [newCustPassword, setNewCustPassword] = useState('Password123!');
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustEmail, setNewCustEmail] = useState('');
+  const [newCustStartDate, setNewCustStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newCustExpiryDate, setNewCustExpiryDate] = useState('2026-08-25');
+
   const [liveChannels, setLiveChannels] = useState<LiveChannel[]>([]);
   const [adCampaigns, setAdCampaigns] = useState<AdCampaign[]>([]);
   const [dashboardMetrics, setDashboardMetrics] = useState<any>({
@@ -139,13 +153,175 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
     fetchAdminMovies();
     fetchDashboardMetrics();
     fetchAdminUsers();
+    fetchCustomerUsers();
     fetchLiveChannels();
     fetchAdCampaigns();
   }, []);
 
+  const getAdminHeaders = (extra: Record<string, string> = {}) => {
+    const token = localStorage.getItem('cineverse_admin_token') || 'admin_jwt_demo_token';
+    return {
+      'Authorization': `Bearer ${token}`,
+      'X-Admin-Token': token,
+      ...extra,
+    };
+  };
+
+  const fetchCustomerUsers = async () => {
+    try {
+      const res = await fetch('/api/v1/admin/platform-users', {
+        headers: getAdminHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomerUsers(data.users);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustUsername || !newCustPassword) {
+      alert('Username and password are required.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/v1/admin/platform-users', {
+        method: 'POST',
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          username: newCustUsername,
+          password: newCustPassword,
+          name: newCustName || newCustUsername,
+          email: newCustEmail || `${newCustUsername}@cineverse.com`,
+          subscriptionStartDate: newCustStartDate,
+          subscriptionExpiryDate: newCustExpiryDate,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to create customer account');
+        return;
+      }
+
+      showToast(`Created account "${newCustUsername}" with expiry ${newCustExpiryDate}!`);
+      setIsAddCustomerModalOpen(false);
+      setNewCustUsername('');
+      setNewCustPassword('Password123!');
+      setNewCustName('');
+      setNewCustEmail('');
+      fetchCustomerUsers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleExtendSubscription = async (userId: string, username: string, days: number) => {
+    try {
+      const res = await fetch(`/api/v1/admin/platform-users/${userId}/extend-subscription`, {
+        method: 'POST',
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ days }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Extended "${username}" by +${days} days! New Expiry: ${data.user.subscriptionExpiryDate}`);
+        fetchCustomerUsers();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCustomExpiryDate = async (userId: string, username: string, currentExpiry: string) => {
+    const newExpiry = prompt(`Set new subscription expiry date for ${username} (YYYY-MM-DD):`, currentExpiry || '2026-08-25');
+    if (!newExpiry) return;
+
+    try {
+      const res = await fetch(`/api/v1/admin/platform-users/${userId}/extend-subscription`, {
+        method: 'POST',
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ customExpiryDate: newExpiry }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Updated ${username}'s expiry date to ${newExpiry}`);
+        fetchCustomerUsers();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleResetCustomerPassword = async (userId: string, username: string) => {
+    const newPass = prompt(`Enter new password for customer "${username}":`, 'Password123!');
+    if (!newPass) return;
+
+    try {
+      const res = await fetch(`/api/v1/admin/platform-users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ newPassword: newPass }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Password for ${username} reset to "${data.newPassword}"`);
+        fetchCustomerUsers();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleCustomerStatus = async (userId: string, username: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
+
+    try {
+      const res = await fetch(`/api/v1/admin/platform-users/${userId}`, {
+        method: 'PUT',
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (res.ok) {
+        showToast(`Account "${username}" status set to ${nextStatus}`);
+        fetchCustomerUsers();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteCustomer = async (userId: string, username: string) => {
+    if (!confirm(`Are you sure you want to permanently delete customer account "${username}"?`)) return;
+
+    try {
+      const res = await fetch(`/api/v1/admin/platform-users/${userId}`, {
+        method: 'DELETE',
+        headers: getAdminHeaders(),
+      });
+
+      if (res.ok) {
+        showToast(`Customer "${username}" deleted`);
+        fetchCustomerUsers();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const fetchAdminMovies = async () => {
     try {
-      const res = await fetch('/api/v1/admin/movies');
+      const res = await fetch('/api/v1/admin/movies', {
+        headers: getAdminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setMovies(data.movies);
@@ -157,7 +333,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
 
   const fetchDashboardMetrics = async () => {
     try {
-      const res = await fetch('/api/v1/admin/dashboard');
+      const res = await fetch('/api/v1/admin/dashboard', {
+        headers: getAdminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setDashboardMetrics(data.metrics);
@@ -169,7 +347,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
 
   const fetchAdminUsers = async () => {
     try {
-      const res = await fetch('/api/v1/admin/users');
+      const res = await fetch('/api/v1/admin/users', {
+        headers: getAdminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setAdminUsers(data.users);
@@ -181,7 +361,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
 
   const fetchLiveChannels = async () => {
     try {
-      const res = await fetch('/api/v1/admin/live-tv');
+      const res = await fetch('/api/v1/admin/live-tv', {
+        headers: getAdminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setLiveChannels(data.channels);
@@ -193,7 +375,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
 
   const fetchAdCampaigns = async () => {
     try {
-      const res = await fetch('/api/v1/admin/ads');
+      const res = await fetch('/api/v1/admin/ads', {
+        headers: getAdminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setAdCampaigns(data.campaigns);
@@ -229,12 +413,6 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
     }
   };
 
-  const handleAdminLogout = () => {
-    localStorage.removeItem('cineverse_admin_token');
-    setIsAdminAuthenticated(false);
-    showToast('Logged out of Admin CMS');
-  };
-
   // Movie Creation / Editing
   const handleSaveMovie = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,7 +441,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
       if (isCreatingMovie) {
         const res = await fetch('/api/v1/admin/movies', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(payload),
         });
         const data = await res.json();
@@ -278,7 +456,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
       } else if (editingMovie) {
         const res = await fetch(`/api/v1/admin/movies/${editingMovie.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(payload),
         });
         const data = await res.json();
@@ -301,7 +479,10 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
   const handleDeleteMovie = async (movieId: string, title: string) => {
     if (!confirm(`Are you sure you want to permanently remove "${title}" from CMS?`)) return;
     try {
-      const res = await fetch(`/api/v1/admin/movies/${movieId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/v1/admin/movies/${movieId}`, {
+        method: 'DELETE',
+        headers: getAdminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setMovies(data.catalog);
@@ -318,7 +499,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
     try {
       const res = await fetch(`/api/v1/admin/users/${userId}/role`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ role: newRole }),
       });
       if (res.ok) {
@@ -349,6 +530,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
     }
   };
 
+  const handleAdminLogout = () => {
+    localStorage.removeItem('cineverse_admin_token');
+    localStorage.removeItem('cineverse_admin_email');
+    setIsAdminAuthenticated(false);
+    window.history.pushState({}, '', '/admin/login');
+  };
+
   // If not authenticated as Admin, show Admin Login Portal
   if (!isAdminAuthenticated) {
     return (
@@ -357,6 +545,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
           setIsAdminAuthenticated(true);
           setActiveAdminRole(role);
           setAdminEmail(email);
+          window.history.pushState({}, '', '/admin/dashboard');
           showToast(`🔐 Admin CMS Access Granted as ${role}`);
         }}
         onReturnToUserSite={onReturnToUserSite}
@@ -1228,73 +1417,325 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onReturnToUserSite }) => {
             </div>
           )}
 
-          {/* TAB 7: USERS & ROLES MANAGER */}
+          {/* TAB 7: USERS & SUBSCRIPTIONS MANAGER */}
           {activeTab === 'users' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-white uppercase tracking-tight">Admin Personnel & Role Permissions</h2>
-                <p className="text-xs text-neutral-400">Assign role-based permissions (Super Admin, Movie Manager, Content Editor, Moderator, Support)</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tight">Customer Accounts & Subscriptions</h2>
+                  <p className="text-xs text-neutral-400">Manage user accounts, passwords, subscription start/expiry dates, and access controls</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="p-1 rounded-xl bg-black/60 border border-white/10 flex items-center text-xs">
+                    <button
+                      onClick={() => setUserTabMode('customers')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                        userTabMode === 'customers' ? 'bg-red-600 text-white shadow' : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Customers ({customerUsers.length})
+                    </button>
+                    <button
+                      onClick={() => setUserTabMode('admin_team')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                        userTabMode === 'admin_team' ? 'bg-red-600 text-white shadow' : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Admin Team ({adminUsers.length})
+                    </button>
+                  </div>
+
+                  {userTabMode === 'customers' && (
+                    <button
+                      onClick={() => setIsAddCustomerModalOpen(true)}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-lg shadow-red-600/30 transition"
+                    >
+                      <Plus className="w-4 h-4" /> Add Customer Account
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="border border-white/10 rounded-2xl bg-[#0d0e12] overflow-hidden">
-                <table className="w-full text-left text-xs text-neutral-300">
-                  <thead className="bg-[#12141c] text-[10px] uppercase font-black text-neutral-400 border-b border-white/10">
-                    <tr>
-                      <th className="p-3.5">User Name</th>
-                      <th className="p-3.5">Email</th>
-                      <th className="p-3.5">Assigned Role</th>
-                      <th className="p-3.5">Status</th>
-                      <th className="p-3.5">Last Login</th>
-                      <th className="p-3.5 text-right">Role Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5 font-semibold">
-                    {adminUsers.map((u) => (
-                      <tr key={u.id} className="hover:bg-white/5 transition">
-                        <td className="p-3.5 font-bold text-white flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-full bg-red-600/20 border border-red-600/40 text-red-400 flex items-center justify-center text-xs font-bold">
-                            {u.name.charAt(0)}
-                          </div>
-                          <span>{u.name}</span>
-                        </td>
-                        <td className="p-3.5 text-neutral-400">{u.email}</td>
-                        <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded-full bg-red-600/20 border border-red-600/40 text-red-400 text-[10px] font-black uppercase">
-                            {u.role}
-                          </span>
-                        </td>
-                        <td className="p-3.5">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            u.status === 'Active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                          }`}>
-                            {u.status}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-neutral-400">{u.lastLogin}</td>
-                        <td className="p-3.5 text-right space-x-2">
-                          <select
-                            value={u.role}
-                            onChange={(e) => handleUpdateUserRole(u.id, e.target.value as any)}
-                            className="bg-black/60 border border-white/15 text-neutral-300 text-[11px] rounded-lg px-2 py-1 focus:outline-none"
-                          >
-                            <option value="Super Admin">Super Admin</option>
-                            <option value="Movie Manager">Movie Manager</option>
-                            <option value="Content Editor">Content Editor</option>
-                            <option value="Moderator">Moderator</option>
-                            <option value="Support">Support</option>
-                          </select>
-
-                          <button
-                            onClick={() => handleToggleUserStatus(u.id, u.status)}
-                            className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 text-[10px] font-bold"
-                          >
-                            {u.status === 'Active' ? 'Suspend' : 'Activate'}
-                          </button>
-                        </td>
+              {/* CUSTOMER ACCOUNTS TABLE */}
+              {userTabMode === 'customers' && (
+                <div className="border border-white/10 rounded-2xl bg-[#0d0e12] overflow-hidden">
+                  <table className="w-full text-left text-xs text-neutral-300">
+                    <thead className="bg-[#12141c] text-[10px] uppercase font-black text-neutral-400 border-b border-white/10">
+                      <tr>
+                        <th className="p-3.5">Username</th>
+                        <th className="p-3.5">Customer Name & Email</th>
+                        <th className="p-3.5">Password</th>
+                        <th className="p-3.5">Subscription Dates</th>
+                        <th className="p-3.5">Days Left</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5">Active Device</th>
+                        <th className="p-3.5 text-right">Subscription Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-white/5 font-semibold">
+                      {customerUsers.map((u) => (
+                        <tr key={u.id} className="hover:bg-white/5 transition">
+                          <td className="p-3.5 font-bold text-white">
+                            <span className="font-mono text-red-400 bg-red-950/40 border border-red-500/30 px-2 py-0.5 rounded text-[11px]">
+                              {u.username}
+                            </span>
+                          </td>
+
+                          <td className="p-3.5">
+                            <div className="font-bold text-white">{u.name}</div>
+                            <div className="text-[10px] text-neutral-400">{u.email}</div>
+                          </td>
+
+                          <td className="p-3.5 font-mono text-neutral-300 text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              <span className="bg-black/60 px-2 py-0.5 rounded border border-white/10 text-neutral-300 font-bold">
+                                {u.rawPasswordForAdmin || 'Password123!'}
+                              </span>
+                              <button
+                                onClick={() => handleResetCustomerPassword(u.id, u.username)}
+                                className="p-1 hover:bg-white/10 rounded text-neutral-400 hover:text-white"
+                                title="Reset Password"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+
+                          <td className="p-3.5">
+                            <div className="text-[11px] text-neutral-300 font-medium">Start: <span className="text-white font-bold">{u.subscriptionStartDate}</span></div>
+                            <div className="text-[11px] text-red-400 font-bold">Expiry: {u.subscriptionExpiryDate}</div>
+                          </td>
+
+                          <td className="p-3.5 font-bold">
+                            {u.daysRemaining < 0 ? (
+                              <span className="text-red-400">Expired</span>
+                            ) : (
+                              <span className="text-emerald-400">{u.daysRemaining} days</span>
+                            )}
+                          </td>
+
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              u.status === 'Active'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : u.status === 'Expired'
+                                ? 'bg-red-600/20 text-red-400 border border-red-500/30'
+                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            }`}>
+                              {u.status}
+                            </span>
+                          </td>
+
+                          <td className="p-3.5 text-neutral-400 text-[11px]">
+                            {u.activeDeviceName || 'No Session'}
+                          </td>
+
+                          <td className="p-3.5 text-right space-x-1.5">
+                            <button
+                              onClick={() => handleExtendSubscription(u.id, u.username, 30)}
+                              className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold transition"
+                              title="Add 30 Days"
+                            >
+                              +30 Days
+                            </button>
+
+                            <button
+                              onClick={() => handleCustomExpiryDate(u.id, u.username, u.subscriptionExpiryDate)}
+                              className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-neutral-200 text-[10px] font-bold transition"
+                              title="Set Custom Date"
+                            >
+                              Set Date
+                            </button>
+
+                            <button
+                              onClick={() => handleToggleCustomerStatus(u.id, u.username, u.status)}
+                              className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[10px] font-bold transition"
+                            >
+                              {u.status === 'Active' ? 'Suspend' : 'Activate'}
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteCustomer(u.id, u.username)}
+                              className="p-1 rounded bg-red-600/20 hover:bg-red-600/40 text-red-400 text-[10px] transition"
+                              title="Delete Customer Account"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* ADMIN TEAM TABLE */}
+              {userTabMode === 'admin_team' && (
+                <div className="border border-white/10 rounded-2xl bg-[#0d0e12] overflow-hidden">
+                  <table className="w-full text-left text-xs text-neutral-300">
+                    <thead className="bg-[#12141c] text-[10px] uppercase font-black text-neutral-400 border-b border-white/10">
+                      <tr>
+                        <th className="p-3.5">User Name</th>
+                        <th className="p-3.5">Email</th>
+                        <th className="p-3.5">Assigned Role</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5">Last Login</th>
+                        <th className="p-3.5 text-right">Role Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5 font-semibold">
+                      {adminUsers.map((u) => (
+                        <tr key={u.id} className="hover:bg-white/5 transition">
+                          <td className="p-3.5 font-bold text-white flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-red-600/20 border border-red-600/40 text-red-400 flex items-center justify-center text-xs font-bold">
+                              {u.name.charAt(0)}
+                            </div>
+                            <span>{u.name}</span>
+                          </td>
+                          <td className="p-3.5 text-neutral-400">{u.email}</td>
+                          <td className="p-3.5">
+                            <span className="px-2 py-0.5 rounded-full bg-red-600/20 border border-red-600/40 text-red-400 text-[10px] font-black uppercase">
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              u.status === 'Active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                            }`}>
+                              {u.status}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-neutral-400">{u.lastLogin}</td>
+                          <td className="p-3.5 text-right space-x-2">
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleUpdateUserRole(u.id, e.target.value as any)}
+                              className="bg-black/60 border border-white/15 text-neutral-300 text-[11px] rounded-lg px-2 py-1 focus:outline-none"
+                            >
+                              <option value="Super Admin">Super Admin</option>
+                              <option value="Movie Manager">Movie Manager</option>
+                              <option value="Content Editor">Content Editor</option>
+                              <option value="Moderator">Moderator</option>
+                              <option value="Support">Support</option>
+                            </select>
+
+                            <button
+                              onClick={() => handleToggleUserStatus(u.id, u.status)}
+                              className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 text-[10px] font-bold"
+                            >
+                              {u.status === 'Active' ? 'Suspend' : 'Activate'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ADD CUSTOMER MODAL */}
+          {isAddCustomerModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="max-w-md w-full bg-[#0d0e14] border border-white/15 rounded-3xl p-6 sm:p-8 space-y-6 text-left relative">
+                <button
+                  onClick={() => setIsAddCustomerModalOpen(false)}
+                  className="absolute right-4 top-4 p-2 rounded-full bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div>
+                  <h3 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-2">
+                    <User className="w-5 h-5 text-red-500" /> Add Customer Account
+                  </h3>
+                  <p className="text-xs text-neutral-400">
+                    Create credentials and set subscription validity dates manually
+                  </p>
+                </div>
+
+                <form onSubmit={handleCreateCustomer} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-extrabold uppercase text-neutral-300 tracking-wider">Username *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newCustUsername}
+                      onChange={(e) => setNewCustUsername(e.target.value)}
+                      placeholder="e.g. user001"
+                      className="w-full bg-black/70 border border-white/15 rounded-xl px-3.5 py-2 text-xs text-white focus:border-red-600 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-extrabold uppercase text-neutral-300 tracking-wider">Password *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newCustPassword}
+                      onChange={(e) => setNewCustPassword(e.target.value)}
+                      placeholder="e.g. Password123!"
+                      className="w-full bg-black/70 border border-white/15 rounded-xl px-3.5 py-2 text-xs text-white focus:border-red-600 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-neutral-300 tracking-wider">Customer Name</label>
+                      <input
+                        type="text"
+                        value={newCustName}
+                        onChange={(e) => setNewCustName(e.target.value)}
+                        placeholder="John Doe"
+                        className="w-full bg-black/70 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:border-red-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-neutral-300 tracking-wider">Email (Optional)</label>
+                      <input
+                        type="email"
+                        value={newCustEmail}
+                        onChange={(e) => setNewCustEmail(e.target.value)}
+                        placeholder="john@example.com"
+                        className="w-full bg-black/70 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:border-red-600 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-neutral-300 tracking-wider">Start Date</label>
+                      <input
+                        type="date"
+                        required
+                        value={newCustStartDate}
+                        onChange={(e) => setNewCustStartDate(e.target.value)}
+                        className="w-full bg-black/70 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:border-red-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-neutral-300 tracking-wider">Expiry Date *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newCustExpiryDate}
+                        onChange={(e) => setNewCustExpiryDate(e.target.value)}
+                        className="w-full bg-black/70 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:border-red-600 focus:outline-none text-red-400 font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl shadow-lg shadow-red-600/30 uppercase tracking-wider transition"
+                  >
+                    Save & Activate Subscription
+                  </button>
+                </form>
               </div>
             </div>
           )}

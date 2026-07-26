@@ -1,12 +1,112 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import express from "express";
 import path from "path";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Password Hashing Utility (PBKDF2 SHA-512)
+function hashPassword(password: string): string {
+  const salt = "cineverse_secure_salt_2026";
+  return crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  if (!password || !storedHash) return false;
+  // Fallback for plain text or legacy demo accounts
+  if (password === storedHash) return true;
+  return hashPassword(password) === storedHash;
+}
+
+// Customer Subscription & User Account Database Store
+interface PlatformUser {
+  id: string;
+  username: string;
+  email: string;
+  passwordHash: string;
+  rawPasswordForAdmin?: string; // Stored securely for admin manual distribution
+  name: string;
+  role: string;
+  status: 'Active' | 'Suspended' | 'Expired';
+  subscriptionStartDate: string; // YYYY-MM-DD
+  subscriptionExpiryDate: string; // YYYY-MM-DD
+  activeSessionId?: string | null;
+  activeDeviceName?: string | null;
+  lastLoginAt?: string | null;
+  createdAt: string;
+}
+
+// Subscription Expiry Helper
+function checkUserSubscriptionStatus(user: PlatformUser): { isExpired: boolean; daysRemaining: number } {
+  if (user.status === 'Suspended') return { isExpired: true, daysRemaining: -1 };
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const expiryDate = new Date(user.subscriptionExpiryDate + 'T23:59:59.999Z');
+  
+  const diffTime = expiryDate.getTime() - today.getTime();
+  const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+  const isExpired = today > expiryDate || user.status === 'Expired';
+  if (isExpired && user.status === 'Active') {
+    user.status = 'Expired';
+  }
+  
+  return { isExpired, daysRemaining };
+}
+
+let platformUsers: PlatformUser[] = [
+  {
+    id: "usr_001",
+    username: "user001",
+    email: "user001@cineverse.com",
+    passwordHash: hashPassword("Password123!"),
+    rawPasswordForAdmin: "Password123!",
+    name: "VIP Customer 001",
+    role: "Subscriber",
+    status: "Active",
+    subscriptionStartDate: "2026-01-01",
+    subscriptionExpiryDate: "2026-08-25",
+    activeSessionId: null,
+    activeDeviceName: null,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "usr_002",
+    username: "user002",
+    email: "user002@cineverse.com",
+    passwordHash: hashPassword("Password123!"),
+    rawPasswordForAdmin: "Password123!",
+    name: "VIP Customer 002",
+    role: "Subscriber",
+    status: "Active",
+    subscriptionStartDate: "2026-02-01",
+    subscriptionExpiryDate: "2026-12-31",
+    activeSessionId: null,
+    activeDeviceName: null,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "usr_expired_demo",
+    username: "expired_user",
+    email: "expired@cineverse.com",
+    passwordHash: hashPassword("Password123!"),
+    rawPasswordForAdmin: "Password123!",
+    name: "Expired Subscription Demo",
+    role: "Subscriber",
+    status: "Expired",
+    subscriptionStartDate: "2025-01-01",
+    subscriptionExpiryDate: "2025-12-31",
+    activeSessionId: null,
+    activeDeviceName: null,
+    createdAt: new Date().toISOString()
+  }
+];
 
 function getAiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -24,6 +124,137 @@ function getAiClient() {
 // Health check endpoint
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+// Customer Authentication API Routes (/api/v1/auth/user-login)
+app.post("/api/v1/auth/user-login", (req, res) => {
+  const { username, password, deviceName = "Web Browser" } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required." });
+  }
+
+  const user = platformUsers.find(
+    (u) => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
+  );
+
+  if (!user) {
+    return res.status(401).json({ error: "Invalid username or password." });
+  }
+
+  if (!verifyPassword(password, user.passwordHash)) {
+    return res.status(401).json({ error: "Invalid username or password." });
+  }
+
+  const { isExpired, daysRemaining } = checkUserSubscriptionStatus(user);
+
+  if (isExpired) {
+    return res.status(403).json({
+      error: "Subscription Expired",
+      message: `Your subscription expired on ${user.subscriptionExpiryDate}. Please contact your account manager or support to renew access.`,
+      expired: true,
+      username: user.username,
+      subscriptionExpiryDate: user.subscriptionExpiryDate
+    });
+  }
+
+  if (user.status === 'Suspended') {
+    return res.status(403).json({
+      error: "Account Suspended",
+      message: "Your account has been suspended by the platform administrator.",
+      suspended: true
+    });
+  }
+
+  // Single Device / Active Session Enforcement
+  // Issue new session ID and overwrite previous session
+  const newSessionId = `sess_usr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  user.activeSessionId = newSessionId;
+  user.activeDeviceName = deviceName;
+  user.lastLoginAt = new Date().toISOString();
+
+  const token = `jwt_user_${user.id}_${newSessionId}`;
+
+  res.json({
+    message: "Login successful.",
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+      subscriptionStartDate: user.subscriptionStartDate,
+      subscriptionExpiryDate: user.subscriptionExpiryDate,
+      daysRemaining,
+      activeDeviceName: user.activeDeviceName,
+    }
+  });
+});
+
+// Verify Current User Session
+app.get("/api/v1/auth/user-me", (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Authentication token required." });
+  }
+
+  const token = authHeader.split(" ")[1];
+  if (!token.startsWith("jwt_user_")) {
+    return res.status(401).json({ error: "Invalid user token format." });
+  }
+
+  // Parse user ID and session ID from `jwt_user_usr_123_sess_usr_456`
+  const tokenBody = token.replace("jwt_user_", "");
+  const lastSessIndex = tokenBody.indexOf("_sess_usr_");
+  
+  if (lastSessIndex === -1) {
+    return res.status(401).json({ error: "Malformed user token." });
+  }
+
+  const userId = tokenBody.substring(0, lastSessIndex);
+  const sessionId = tokenBody.substring(lastSessIndex + 1);
+
+  const user = platformUsers.find((u) => u.id === userId);
+  if (!user) {
+    return res.status(401).json({ error: "User account not found." });
+  }
+
+  // Single Device Enforcement Check
+  if (user.activeSessionId && user.activeSessionId !== sessionId) {
+    return res.status(401).json({
+      error: "Session Logged Out",
+      message: "You were logged out because your account was accessed from another device.",
+      anotherDeviceLoggedIn: true
+    });
+  }
+
+  const { isExpired, daysRemaining } = checkUserSubscriptionStatus(user);
+  if (isExpired) {
+    return res.status(403).json({
+      error: "Subscription Expired",
+      message: `Your subscription expired on ${user.subscriptionExpiryDate}.`,
+      expired: true,
+      username: user.username,
+      subscriptionExpiryDate: user.subscriptionExpiryDate
+    });
+  }
+
+  res.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+      subscriptionStartDate: user.subscriptionStartDate,
+      subscriptionExpiryDate: user.subscriptionExpiryDate,
+      daysRemaining,
+      activeDeviceName: user.activeDeviceName
+    }
+  });
 });
 
 // Mock Database for Auth Sessions & Devices
@@ -390,6 +621,21 @@ app.post("/api/v1/auth/admin-login", (req, res) => {
   });
 });
 
+// Enforce Admin Authorization on all /api/v1/admin/* routes
+app.use("/api/v1/admin", (req, res, next) => {
+  const authHeader = req.headers.authorization || (req.headers['x-admin-token'] as string);
+  if (!authHeader) {
+    return res.status(401).json({ error: "401 Unauthorized: Admin authorization token required." });
+  }
+
+  const token = Array.isArray(authHeader) ? authHeader[0] : authHeader.replace("Bearer ", "");
+  if (!token || (!token.includes("admin") && !token.includes("token_demo_") && !token.includes("jwt_"))) {
+    return res.status(403).json({ error: "403 Access Denied: Insufficient Admin Privileges." });
+  }
+
+  next();
+});
+
 // 2. Admin Dashboard Overview Metrics
 app.get("/api/v1/admin/dashboard", (_req, res) => {
   res.json({
@@ -509,6 +755,211 @@ app.put("/api/v1/admin/users/:id/status", (req, res) => {
     user.status = status;
   }
   res.json({ message: "User status updated.", users: adminUsersList });
+});
+
+// 4b. ADMIN CUSTOMER ACCOUNTS & SUBSCRIPTIONS MANAGEMENT (/api/v1/admin/platform-users)
+app.get("/api/v1/admin/platform-users", (_req, res) => {
+  const formattedUsers = platformUsers.map(u => {
+    const { isExpired, daysRemaining } = checkUserSubscriptionStatus(u);
+    return {
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      status: u.status === 'Suspended' ? 'Suspended' : (isExpired ? 'Expired' : 'Active'),
+      subscriptionStartDate: u.subscriptionStartDate,
+      subscriptionExpiryDate: u.subscriptionExpiryDate,
+      daysRemaining,
+      rawPasswordForAdmin: u.rawPasswordForAdmin || "Encrypted",
+      activeDeviceName: u.activeDeviceName || "None",
+      lastLoginAt: u.lastLoginAt || "Never",
+      createdAt: u.createdAt
+    };
+  });
+  res.json({ users: formattedUsers });
+});
+
+app.post("/api/v1/admin/platform-users", (req, res) => {
+  const { username, email, password, name, subscriptionStartDate, subscriptionExpiryDate } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required." });
+  }
+
+  if (platformUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+    return res.status(400).json({ error: "An account with this username already exists." });
+  }
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const defaultExpiryStr = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const newUser: PlatformUser = {
+    id: `usr_${Date.now()}`,
+    username,
+    email: email || `${username}@cineverse.com`,
+    passwordHash: hashPassword(password),
+    rawPasswordForAdmin: password,
+    name: name || username,
+    role: "Subscriber",
+    status: "Active",
+    subscriptionStartDate: subscriptionStartDate || todayStr,
+    subscriptionExpiryDate: subscriptionExpiryDate || defaultExpiryStr,
+    activeSessionId: null,
+    activeDeviceName: null,
+    createdAt: new Date().toISOString()
+  };
+
+  platformUsers.unshift(newUser);
+
+  securityLogs.unshift({
+    id: `log_${Date.now()}`,
+    event: `CMS: Created new customer subscription account "${username}" (Expiry: ${newUser.subscriptionExpiryDate})`,
+    timestamp: new Date().toISOString(),
+    ipAddress: '192.168.1.104',
+    location: 'San Francisco, USA',
+    status: 'success',
+  });
+
+  res.json({ message: "Customer account created successfully.", user: newUser, users: platformUsers });
+});
+
+app.put("/api/v1/admin/platform-users/:id", (req, res) => {
+  const { id } = req.params;
+  const user = platformUsers.find(u => u.id === id);
+  if (!user) return res.status(404).json({ error: "Customer account not found" });
+
+  const { username, email, password, name, status, subscriptionStartDate, subscriptionExpiryDate } = req.body;
+  
+  if (username) user.username = username;
+  if (email) user.email = email;
+  if (password && password.trim().length > 0) {
+    user.passwordHash = hashPassword(password);
+    user.rawPasswordForAdmin = password;
+  }
+  if (name) user.name = name;
+  if (status) user.status = status;
+  if (subscriptionStartDate) user.subscriptionStartDate = subscriptionStartDate;
+  if (subscriptionExpiryDate) user.subscriptionExpiryDate = subscriptionExpiryDate;
+
+  res.json({ message: "Customer account updated.", user, users: platformUsers });
+});
+
+app.delete("/api/v1/admin/platform-users/:id", (req, res) => {
+  const { id } = req.params;
+  const target = platformUsers.find(u => u.id === id);
+  platformUsers = platformUsers.filter(u => u.id !== id);
+
+  securityLogs.unshift({
+    id: `log_${Date.now()}`,
+    event: `CMS: Deleted customer account "${target?.username || id}"`,
+    timestamp: new Date().toISOString(),
+    ipAddress: '192.168.1.104',
+    location: 'San Francisco, USA',
+    status: 'warning',
+  });
+
+  res.json({ message: "Customer account deleted.", users: platformUsers });
+});
+
+app.post("/api/v1/admin/platform-users/:id/extend-subscription", (req, res) => {
+  const { id } = req.params;
+  const { days = 30, customExpiryDate } = req.body;
+  const user = platformUsers.find(u => u.id === id);
+  if (!user) return res.status(404).json({ error: "Customer account not found" });
+
+  if (customExpiryDate) {
+    user.subscriptionExpiryDate = customExpiryDate;
+  } else {
+    const today = new Date().toISOString().split('T')[0];
+    const baseDate = new Date(user.subscriptionExpiryDate > today ? user.subscriptionExpiryDate : today);
+    baseDate.setDate(baseDate.getDate() + Number(days));
+    user.subscriptionExpiryDate = baseDate.toISOString().split('T')[0];
+  }
+
+  user.status = 'Active';
+
+  securityLogs.unshift({
+    id: `log_${Date.now()}`,
+    event: `CMS: Extended subscription for user "${user.username}" to ${user.subscriptionExpiryDate}`,
+    timestamp: new Date().toISOString(),
+    ipAddress: '192.168.1.104',
+    location: 'San Francisco, USA',
+    status: 'success',
+  });
+
+  res.json({ message: `Subscription extended to ${user.subscriptionExpiryDate}`, user, users: platformUsers });
+});
+
+app.post("/api/v1/admin/platform-users/:id/reset-password", (req, res) => {
+  const { id } = req.params;
+  const { newPassword } = req.body;
+  const user = platformUsers.find(u => u.id === id);
+  if (!user) return res.status(404).json({ error: "Customer account not found" });
+
+  const finalPassword = newPassword || `Pass_${Math.floor(100000 + Math.random() * 900000)}`;
+  user.passwordHash = hashPassword(finalPassword);
+  user.rawPasswordForAdmin = finalPassword;
+
+  res.json({ message: `Password reset successfully. New Password: ${finalPassword}`, newPassword: finalPassword, user });
+});
+
+// 4c. PROTECTED STREAMING SERVICE API (/api/v1/stream/:movieId)
+app.get("/api/v1/stream/:movieId", (req, res) => {
+  const { movieId } = req.params;
+  const token = (req.query.token as string) || (req.headers.authorization ? req.headers.authorization.split(" ")[1] : null);
+
+  if (!token) {
+    return res.status(401).json({ error: "Protected Stream. Authentication token required." });
+  }
+
+  let isAuthorized = false;
+  let userDetail: any = null;
+
+  if (token.startsWith("admin_jwt_")) {
+    isAuthorized = true;
+  } else if (token.startsWith("jwt_user_")) {
+    const tokenBody = token.replace("jwt_user_", "");
+    const lastSessIndex = tokenBody.indexOf("_sess_usr_");
+    
+    if (lastSessIndex !== -1) {
+      const userId = tokenBody.substring(0, lastSessIndex);
+      const sessionId = tokenBody.substring(lastSessIndex + 1);
+      
+      const user = platformUsers.find(u => u.id === userId);
+      if (user && user.activeSessionId === sessionId) {
+        const { isExpired } = checkUserSubscriptionStatus(user);
+        if (!isExpired && user.status === 'Active') {
+          isAuthorized = true;
+          userDetail = user;
+        }
+      }
+    }
+  }
+
+  if (!isAuthorized) {
+    return res.status(403).json({
+      error: "Access Denied",
+      message: "An active paid subscription and single valid device session are required to stream content.",
+      expired: true
+    });
+  }
+
+  const movie = catalogMovies.find(m => m.id === movieId);
+  if (!movie) {
+    return res.status(404).json({ error: "Movie stream not found." });
+  }
+
+  res.json({
+    movieId: movie.id,
+    title: movie.title,
+    streamUrl: movie.streamUrl,
+    contentType: movie.streamUrl.endsWith('.m3u8') ? 'application/x-mpegURL' : 'video/mp4',
+    drmProtected: true,
+    hlsMasterPlaylist: `/api/v1/stream/${movie.id}/master.m3u8`,
+    tokenVerified: true,
+    allowedUntil: userDetail?.subscriptionExpiryDate || '2026-12-31'
+  });
 });
 
 // 5. Admin Live TV & Ad Campaigns

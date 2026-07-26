@@ -13,12 +13,28 @@ import { AuthAndProfileModal, UserProfile } from './components/AuthAndProfileMod
 import { SubscriptionModal } from './components/SubscriptionModal';
 import { AdminCmsModal } from './components/AdminCmsModal';
 import { AdminApp } from './components/AdminApp';
+import { CustomerLoginPage } from './components/CustomerLoginPage';
+import { SubscriptionExpiredScreen } from './components/SubscriptionExpiredScreen';
 import { Footer } from './components/Footer';
 
 export default function App() {
   const [pathMode, setPathMode] = useState<'user' | 'admin'>(() => {
     return window.location.pathname.startsWith('/admin') ? 'admin' : 'user';
   });
+
+  // User Auth & Subscription session state
+  const [userSession, setUserSession] = useState<{
+    id: string;
+    username: string;
+    name: string;
+    email: string;
+    subscriptionStartDate: string;
+    subscriptionExpiryDate: string;
+    daysRemaining: number;
+  } | null>(null);
+
+  const [authStatus, setAuthStatus] = useState<'loading' | 'authenticated' | 'unauthenticated' | 'expired'>('loading');
+  const [expiredInfo, setExpiredInfo] = useState<{ username?: string; subscriptionExpiryDate?: string; message?: string } | undefined>(undefined);
 
   const [movies, setMovies] = useState<Movie[]>(() => {
     const saved = localStorage.getItem('cinephile_ott_movies');
@@ -46,8 +62,7 @@ export default function App() {
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop',
     isKids: false,
   });
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
-  const [currentPlan, setCurrentPlan] = useState('Premium 4K');
+  const [currentPlan, setCurrentPlan] = useState('Premium 4K Ultra');
 
   // Filters State
   const [filter, setFilter] = useState<FilterState>({
@@ -67,7 +82,57 @@ export default function App() {
   const [isTriviaOpen, setIsTriviaOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
-  const [isAdminCmsOpen, setIsAdminCmsOpen] = useState(false);
+
+  // Validate session on mount
+  const checkUserSession = async () => {
+    const token = localStorage.getItem('cineverse_user_token');
+    if (!token) {
+      setAuthStatus('unauthenticated');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/v1/auth/user-me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (res.status === 200) {
+        setUserSession(data.user);
+        setAuthStatus('authenticated');
+      } else if (res.status === 402 || res.status === 403 || data.expired) {
+        setExpiredInfo({
+          username: data.username,
+          subscriptionExpiryDate: data.subscriptionExpiryDate,
+          message: data.error || data.message,
+        });
+        setAuthStatus('expired');
+      } else {
+        localStorage.removeItem('cineverse_user_token');
+        setUserSession(null);
+        setAuthStatus('unauthenticated');
+      }
+    } catch (e) {
+      console.error('Session check failed:', e);
+      setAuthStatus('unauthenticated');
+    }
+  };
+
+  useEffect(() => {
+    checkUserSession();
+  }, []);
+
+  const handleLoginSuccess = (user: any, token: string) => {
+    localStorage.setItem('cineverse_user_token', token);
+    setUserSession(user);
+    setAuthStatus('authenticated');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('cineverse_user_token');
+    setUserSession(null);
+    setAuthStatus('unauthenticated');
+  };
 
   // Fetch live movies catalog from backend API & keep in sync with CMS uploads
   const loadMoviesFromApi = async () => {
@@ -124,6 +189,39 @@ export default function App() {
 
   if (pathMode === 'admin') {
     return <AdminApp onReturnToUserSite={() => navigateTo('user')} />;
+  }
+
+  // Enforce customer login requirement
+  if (authStatus === 'loading') {
+    return (
+      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center space-y-4">
+        <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+        <div className="text-xs uppercase tracking-widest font-black text-neutral-400">Verifying Cineverse Subscription Session...</div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'unauthenticated') {
+    return (
+      <CustomerLoginPage
+        onLoginSuccess={handleLoginSuccess}
+        onShowExpiredScreen={(info) => {
+          setExpiredInfo(info);
+          setAuthStatus('expired');
+        }}
+        onOpenAdminPortal={() => navigateTo('admin')}
+      />
+    );
+  }
+
+  if (authStatus === 'expired') {
+    return (
+      <SubscriptionExpiredScreen
+        expiredInfo={expiredInfo}
+        onLogOut={handleLogout}
+        onOpenAdminPortal={() => navigateTo('admin')}
+      />
+    );
   }
 
   const handleFilterChange = (updated: Partial<FilterState>) => {
@@ -293,8 +391,10 @@ export default function App() {
         onClose={() => setIsAuthOpen(false)}
         currentProfile={currentProfile}
         onSelectProfile={(p) => setCurrentProfile(p)}
-        isLoggedIn={isLoggedIn}
-        onToggleLogin={(status) => setIsLoggedIn(status)}
+        isLoggedIn={authStatus === 'authenticated'}
+        onToggleLogin={(status) => {
+          if (!status) handleLogout();
+        }}
       />
 
       <SubscriptionModal
