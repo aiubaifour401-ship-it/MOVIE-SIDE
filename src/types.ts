@@ -50,6 +50,69 @@ export interface Movie {
   subtitles?: string[];
   reviews: Review[];
   similarMovieIds?: string[];
+  isKidsFriendly?: boolean;
+  isSports?: boolean;
+  sportsLeague?: string;
+  liveStatus?: 'LIVE' | 'UPCOMING' | 'HIGHLIGHTS';
+  top10Rank?: number; // 1 to 10
+  isPopularInBangladesh?: boolean;
+  country?: string;
+  isSeries?: boolean;
+  seasonsCount?: number;
+  episodes?: Episode[];
+}
+
+export interface Episode {
+  id: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+  synopsis: string;
+  durationMinutes: number;
+  thumbnailUrl: string;
+  streamUrl?: string;
+}
+
+export interface ContinueWatchingItem {
+  movieId: string;
+  movieTitle: string;
+  posterUrl: string;
+  backdropUrl: string;
+  progressSeconds: number;
+  durationSeconds: number;
+  lastWatchedAt: string;
+  profileId?: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  type: 'movie' | 'subscription' | 'payment' | 'notice';
+  linkMovieId?: string;
+}
+
+export interface BannerSlide {
+  id: string;
+  movieId?: string;
+  title: string;
+  tagline: string;
+  synopsis: string;
+  backdropUrl: string;
+  posterUrl: string;
+  badge?: string;
+  active: boolean;
+}
+
+export interface Coupon {
+  id: string;
+  code: string;
+  discountPercent?: number;
+  bonusDays?: number;
+  expiresAt: string;
+  active: boolean;
 }
 
 export type WatchStatus = 'plan_to_watch' | 'watching' | 'completed';
